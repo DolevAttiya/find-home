@@ -47,6 +47,15 @@ TODAY = date.today()
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+def _fmt_rooms(val) -> str:
+    """3.0 → '3'  |  3.5 → '3.5'  |  None → '-'"""
+    if val is None:
+        return "-"
+    try:
+        return f"{float(val):g}"
+    except (TypeError, ValueError):
+        return str(val)
+
 def _days_on_market(apt: dict) -> int | None:
     for field in ("posted_at", "scraped_at"):
         val = apt.get(field)
@@ -162,8 +171,8 @@ def _render_gallery(images: list):
     st.html(html)
 
 
-def _render_apt_detail(apt: dict):
-    post_id = apt.get("post_id") or str(apt.get("id") or id(apt))
+def _render_apt_detail(apt: dict, key_prefix: str = ""):
+    post_id = (key_prefix + "_" if key_prefix else "") + (apt.get("post_id") or str(apt.get("id") or id(apt)))
 
     # ── header badges ──
     src_label = {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2"}.get(apt.get("source", ""), apt.get("source", ""))
@@ -222,7 +231,7 @@ def _render_apt_detail(apt: dict):
 
     # ── specs ──
     c1, c2, c3 = st.columns(3)
-    c1.metric("חדרים", apt.get("rooms") or "-")
+    c1.metric("חדרים", _fmt_rooms(apt.get("rooms")))
     c2.metric("מ״ר", int(apt["size_sqm"]) if apt.get("size_sqm") else "-")
     c3.metric("קומה", apt.get("floor") or "-")
 
@@ -405,11 +414,13 @@ if page == "תוצאות":
             # ── build display columns ──
             df_display = pd.DataFrame(apartments)
 
-            df_display["סטטוס"] = [_status_badges(a) for a in apartments]
+            df_display["סטטוס"]  = [_status_badges(a) for a in apartments]
+            df_display["חד׳"]    = [_fmt_rooms(a.get("rooms")) for a in apartments]
+            df_display['מ"ר']    = [str(int(a["size_sqm"])) if a.get("size_sqm") else "-" for a in apartments]
             df_display["מקור"]  = df_display["source"].map(
                 {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2"}
             ).fillna(df_display["source"])
-            df_display["ימים"]  = [_days_label(_days_on_market(a)) for a in apartments]
+            df_display["ימים"]  = [_days_on_market(a) for a in apartments]
 
             def _price_col(apt):
                 p = apt.get("price")
@@ -430,14 +441,12 @@ if page == "תוצאות":
             df_display["חניה"]  = fmt_bool3(df_display["has_parking"])
             df_display["מרפסת"] = fmt_bool3(df_display["has_balcony"])
 
-            visible_cols = ["סטטוס", "address", "מחיר ₪", "rooms", "size_sqm", "floor", "ימים", 'ממ"ד', "חניה", "מרפסת", "מקור"]
+            visible_cols = ["סטטוס", "address", "מחיר ₪", "חד׳", 'מ"ר', "floor", "ימים", 'ממ"ד', "חניה", "מרפסת", "מקור"]
             visible_cols = [c for c in visible_cols if c in df_display.columns]
 
             col_rename = {
-                "address":  "כתובת",
-                "rooms":    "חד׳",
-                "size_sqm": "מ״ר",
-                "floor":    "קומה",
+                "address": "כתובת",
+                "floor":   "קומה",
             }
 
             # Row styling: new=green, price-drop=orange, inactive=red, seen=gray
@@ -503,7 +512,7 @@ if page == "תוצאות":
                 )
                 for _, row in map_df.iterrows():
                     price_str = f"{int(row['price']):,} ₪" if pd.notna(row.get("price")) and row.get("price") else "מחיר לא ידוע"
-                    rooms_str = f"{row['rooms']} חד׳" if pd.notna(row.get("rooms")) and row.get("rooms") else ""
+                    rooms_str = f"{_fmt_rooms(row.get('rooms'))} חד׳" if pd.notna(row.get("rooms")) and row.get("rooms") else ""
                     size_str  = f"{int(row['size_sqm'])} מ״ר" if pd.notna(row.get("size_sqm")) and row.get("size_sqm") else ""
                     floor_str = f"קומה {row['floor']}" if row.get("floor") else ""
                     addr_str  = row.get("address") or ""
@@ -558,7 +567,7 @@ if page == "תוצאות":
                         apt_row = map_df.loc[dists.idxmin()].to_dict()
                         st.divider()
                         st.subheader(apt_row.get("address") or "פרטי דירה")
-                        _render_apt_detail(apt_row)
+                        _render_apt_detail(apt_row, key_prefix="map")
 
                 st.caption(f"{len(map_df)} דירות על המפה  |  ירוק = ראיתי")
     else:

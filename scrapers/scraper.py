@@ -320,7 +320,7 @@ def _launch_worker(args: list) -> tuple[int, str | None]:
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
-        cwd=os.path.dirname(os.path.abspath(__file__)),
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
     new_count = 0
     for line in proc.stdout:

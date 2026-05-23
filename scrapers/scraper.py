@@ -2,6 +2,8 @@ import re
 import time
 import yaml
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from core.database import save_apartment, save_group, get_groups, init_db

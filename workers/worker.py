@@ -6,9 +6,11 @@ Usage:
   python worker.py yad2
 """
 import sys
+import os
 import json
 import time
 import io
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 from playwright.sync_api import sync_playwright

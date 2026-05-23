@@ -6,6 +6,7 @@
 סגירה: Ctrl+C בחלון זה (או סגרו את חלון הדפדפן)
 """
 import sys, io, time, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 import socket

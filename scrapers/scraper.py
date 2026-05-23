@@ -389,14 +389,14 @@ def run_scrape(status_callback=None) -> dict:
 
     tasks = {}  # future → label
     with ThreadPoolExecutor(max_workers=FB_PARALLEL + 2) as pool:
-        # פייסבוק - 4 קבוצות במקביל
+        # מדלן ויד2 קודם — כדי שיתפסו slot מיד ולא יחכו בתור אחרי 60+ קבוצות פייסבוק
+        tasks[pool.submit(_launch_worker, ["madlan"])] = "מדלן"
+        tasks[pool.submit(_launch_worker, ["yad2"])] = "יד2"
+
+        # פייסבוק - FB_PARALLEL קבוצות במקביל
         for group in all_groups:
             f = pool.submit(_launch_worker, ["facebook", json.dumps(group, ensure_ascii=False)])
             tasks[f] = group["group_name"]
-
-        # מדלן ויד2 במקביל לפייסבוק
-        tasks[pool.submit(_launch_worker, ["madlan"])] = "מדלן"
-        tasks[pool.submit(_launch_worker, ["yad2"])] = "יד2"
 
         for future in as_completed(tasks):
             label = tasks[future]

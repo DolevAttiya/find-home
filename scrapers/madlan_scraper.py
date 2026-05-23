@@ -140,7 +140,7 @@ def _collect_urls(page: Page, search_url: str, log, max_listings=60) -> list[str
     if html_size < 50000:
         log("מדלן: CAPTCHA — מנסה לפתור אוטומטית...")
         try:
-            from madlan_captcha_solver import PerimeterXSolver
+            from scrapers.madlan_captcha_solver import PerimeterXSolver
             solver = PerimeterXSolver(profile_dir=MADLAN_PROFILE)
             solved = solver.solve(page, log=log)
         except Exception as e:

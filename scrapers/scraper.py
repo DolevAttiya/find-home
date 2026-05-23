@@ -413,7 +413,7 @@ def run_scrape(status_callback=None) -> dict:
     # Geocoding לכתובות חדשות
     if results["new_apartments"] > 0:
         try:
-            from geocoder import geocode_pending
+            from core.geocoder import geocode_pending
             config = load_config()
             city = config.get("חיפוש", {}).get("מיקום", "")
             log("ממיר כתובות לקואורדינטות...")

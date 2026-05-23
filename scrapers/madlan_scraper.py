@@ -5,10 +5,10 @@ import time
 import random
 import yaml
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
-from database import save_apartment, update_amenities
-from image_utils import download_images
+from core.database import save_apartment, update_amenities
+from core.image_utils import download_images
 
-MADLAN_PROFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "madlan_profile")
+MADLAN_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "madlan_profile")
 
 RESALE_URL   = "https://www.madlan.co.il/for-sale/%D7%92%D7%91%D7%A2%D7%AA%D7%99%D7%99%D7%9D-%D7%99%D7%A9%D7%A8%D7%90%D7%9C?dealType=secondHand"
 PROJECTS_URL = "https://www.madlan.co.il/for-sale/%D7%92%D7%91%D7%A2%D7%AA%D7%99%D7%99%D7%9D-%D7%99%D7%A9%D7%A8%D7%90%D7%9C"

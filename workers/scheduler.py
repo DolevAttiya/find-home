@@ -2,7 +2,7 @@ import schedule
 import time
 import yaml
 import threading
-from scraper import run_scrape
+from scrapers.scraper import run_scrape
 
 
 def load_interval() -> int:

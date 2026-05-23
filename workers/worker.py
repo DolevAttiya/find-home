@@ -33,8 +33,8 @@ def make_browser(p, use_session=False, session_path=None):
 
 
 def run_facebook(group: dict):
-    from scraper import scrape_group, load_config
-    from database import init_db
+    from scrapers.scraper import scrape_group, load_config
+    from core.database import init_db
 
     init_db()
     config = load_config()
@@ -55,11 +55,11 @@ def run_facebook(group: dict):
 
 
 def run_madlan():
-    from database import init_db
-    from madlan_scraper import scrape_madlan
+    from core.database import init_db
+    from scrapers.madlan_scraper import scrape_madlan
     import os, socket
 
-    MADLAN_PROFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "madlan_profile")
+    MADLAN_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "madlan_profile")
     CDP_PORT = 9222
 
     STEALTH_SCRIPT = """
@@ -79,7 +79,7 @@ def run_madlan():
         # אם CDP לא פעיל — מנסה להפעיל Chrome אמיתי אוטומטית
         if not _cdp_alive():
             try:
-                from madlan_captcha_solver import PerimeterXSolver
+                from scrapers.madlan_captcha_solver import PerimeterXSolver
                 _solver = PerimeterXSolver(profile_dir=MADLAN_PROFILE, cdp_port=CDP_PORT)
                 if _solver.chrome_path:
                     log("[מדלן] מפעיל Chrome אמיתי...")
@@ -146,7 +146,7 @@ def run_madlan():
 
     # ג'יאוקודינג — ממיר כתובות ל-lat/lon עבור כל הדירות שעדיין חסרות קואורדינטות
     try:
-        from geocoder import geocode_pending
+        from core.geocoder import geocode_pending
         log("[מדלן] ממיר כתובות ל-lat/lon...")
         geocode_pending(city="גבעתיים")
     except Exception as e:
@@ -154,8 +154,8 @@ def run_madlan():
 
 
 def run_yad2():
-    from yad2_scraper import scrape_yad2
-    from database import init_db
+    from scrapers.yad2_scraper import scrape_yad2
+    from core.database import init_db
 
     init_db()
     with sync_playwright() as p:

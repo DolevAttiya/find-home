@@ -2,7 +2,7 @@ import time
 import sqlite3
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-from database import DB_PATH
+from core.database import DB_PATH
 
 geolocator = Nominatim(user_agent="fb-apartments-scraper")
 

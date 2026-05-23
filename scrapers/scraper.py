@@ -4,7 +4,7 @@ import yaml
 import os
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from database import save_apartment, save_group, get_groups, init_db
+from core.database import save_apartment, save_group, get_groups, init_db
 
 load_dotenv()
 
@@ -313,7 +313,7 @@ def _launch_worker(args: list) -> tuple[int, str | None]:
     """מריץ worker subprocess, מחזיר (new_count, error)"""
     import subprocess, sys
     proc = subprocess.Popen(
-        [sys.executable, "worker.py"] + args,
+        [sys.executable, "workers/worker.py"] + args,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

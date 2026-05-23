@@ -3,8 +3,8 @@ import json
 import time
 import yaml
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
-from database import save_apartment
-from image_utils import download_images
+from core.database import save_apartment
+from core.image_utils import download_images
 
 
 

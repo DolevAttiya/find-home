@@ -9,7 +9,7 @@ from pathlib import Path
 from streamlit_folium import st_folium
 
 APP_DIR = Path(__file__).parent
-from database import (
+from core.database import (
     init_db, get_apartments, get_groups, get_stats,
     mark_seen, update_note, mark_inactive,
 )
@@ -572,7 +572,7 @@ if page == "תוצאות":
         messages = []
         with st.spinner("סורק... (חלון דפדפן ייפתח)"):
             proc = subprocess.Popen(
-                [sys.executable, "scraper.py"],
+                [sys.executable, "scrapers/scraper.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

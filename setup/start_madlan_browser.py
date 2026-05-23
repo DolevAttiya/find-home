@@ -11,7 +11,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 import socket
 from playwright.sync_api import sync_playwright
 
-MADLAN_PROFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "madlan_profile")
+MADLAN_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "madlan_profile")
 GIVATAIM_URL   = "https://www.madlan.co.il/for-sale/%D7%92%D7%91%D7%A2%D7%AA%D7%99%D7%99%D7%9D-%D7%99%D7%A9%D7%A8%D7%90%D7%9C"
 CDP_PORT       = 9222
 
@@ -27,7 +27,7 @@ if _port_in_use(CDP_PORT):
     sys.exit(0)
 
 # אם Chrome אמיתי קיים — מפעיל אותו ישירות (עוקף fingerprint detection)
-from madlan_captcha_solver import PerimeterXSolver
+from scrapers.madlan_captcha_solver import PerimeterXSolver
 _solver = PerimeterXSolver(profile_dir=MADLAN_PROFILE, cdp_port=CDP_PORT)
 if _solver.chrome_path:
     print(f"✓  נמצא Chrome: {_solver.chrome_path}")

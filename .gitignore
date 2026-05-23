@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# Database & personal data
+*.db
+apartment_images/
+
+# Sensitive session files
+fb_session.json
+madlan_profile/
+*.json
+
+# Debug output files
+*.png
+*.html
+api_*.json
+
+# IDE
+.vscode/
+.idea/

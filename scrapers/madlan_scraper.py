@@ -435,9 +435,9 @@ def scrape_madlan(page: Page, log=None) -> int:
     # יוצרים solver פעם אחת — משתמשים בו בכל הדפים
     solver = None
     try:
-        from madlan_captcha_solver import PerimeterXSolver
+        from scrapers.madlan_captcha_solver import PerimeterXSolver
         solver = PerimeterXSolver(profile_dir=MADLAN_PROFILE)
-    except Exception:
+    except Exception as e:
         pass
 
     # --- שלב 1: איסוף קישורים ---

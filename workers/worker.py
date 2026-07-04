@@ -155,22 +155,174 @@ def run_madlan():
         log(f"[מדלן] geocoding שגיאה: {e}")
 
 
-def run_yad2():
-    from scrapers.yad2_scraper import scrape_yad2
+def run_dorin():
     from core.database import init_db
+    from scrapers.dorin_scraper import scrape_dorin
+
+    init_db()
+    try:
+        new = scrape_dorin(log=log)
+        print(f"__RESULT__:{new}", flush=True)
+    except Exception as e:
+        log(f"[דורין] שגיאה: {e}")
+        print("__RESULT__:0", flush=True)
+
+
+def run_yad2():
+    from core.database import init_db
+    from scrapers.yad2_scraper import scrape_yad2
+    import os, socket
+
+    YAD2_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "yad2_profile")
+    CDP_PORT = 9223  # פורט שונה ממדלן (9222) - שני הסקרייפרים רצים במקביל
+
+    STEALTH_SCRIPT = """
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        window.chrome = { runtime: {} };
+    """
+
+    def _cdp_alive():
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                return s.connect_ex(("127.0.0.1", CDP_PORT)) == 0
+        except Exception:
+            return False
 
     init_db()
     with sync_playwright() as p:
-        browser, context = make_browser(p)
-        page = context.new_page()
+        # יד2 מגנה עם Radware (challenge "Verifying your browser...") - הדפדפן
+        # האמיתי של המשתמש (Edge, עם הפרופיל האמיתי) עובר את זה הרבה יותר טוב
+        # מפרופיל נקי. לא מפעילים אותו כאן אוטומטית - זה דורש לסגור קודם את
+        # Edge הפתוח, וזה משהו שהמשתמש צריך לעשות ביודעין (setup/start_yad2_browser.py)
+        if _cdp_alive():
+            log("[יד2] מתחבר לדפדפן הקיים (CDP)...")
+            try:
+                browser = p.chromium.connect_over_cdp(f"http://localhost:{CDP_PORT}")
+                ctx = browser.contexts[0] if browser.contexts else browser.new_context(
+                    user_agent=UA, viewport={"width": 1280, "height": 800}
+                )
+                page = ctx.new_page()
+                page.add_init_script(STEALTH_SCRIPT)
+                try:
+                    new = scrape_yad2(page, log=log)
+                    print(f"__RESULT__:{new}", flush=True)
+                except Exception as e:
+                    log(f"[יד2] שגיאה: {e}")
+                    print("__RESULT__:0", flush=True)
+                finally:
+                    page.close()  # סוגרים רק את הטאב, לא את הדפדפן!
+                return
+            except Exception as e:
+                log(f"[יד2] חיבור CDP נכשל ({e}), עובר לפרופיל...")
+
+        if os.path.isdir(YAD2_PROFILE):
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=YAD2_PROFILE,
+                headless=False,
+                user_agent=UA,
+                viewport={"width": 1280, "height": 800},
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                ignore_default_args=["--enable-automation"],
+            )
+            page = context.new_page()
+            page.add_init_script(STEALTH_SCRIPT)
+            try:
+                new = scrape_yad2(page, log=log)
+                print(f"__RESULT__:{new}", flush=True)
+            except Exception as e:
+                log(f"[יד2] שגיאה: {e}")
+                print("__RESULT__:0", flush=True)
+            finally:
+                context.close()
+        else:
+            browser, context = make_browser(p)
+            page = context.new_page()
+            page.add_init_script(STEALTH_SCRIPT)
+            try:
+                new = scrape_yad2(page, log=log)
+                print(f"__RESULT__:{new}", flush=True)
+            except Exception as e:
+                log(f"[יד2] שגיאה: {e}")
+                print("__RESULT__:0", flush=True)
+            finally:
+                browser.close()
+
+
+def run_yad2_projects():
+    """אותה חסימת Radware כמו יד2 רגיל - אותה תשתית CDP/פרופיל."""
+    from core.database import init_db
+    from scrapers.yad2_projects_scraper import scrape_yad2_projects
+    import os, socket
+
+    YAD2_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "yad2_profile")
+    CDP_PORT = 9223
+
+    STEALTH_SCRIPT = """
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        window.chrome = { runtime: {} };
+    """
+
+    def _cdp_alive():
         try:
-            new = scrape_yad2(page, log=log)
-            print(f"__RESULT__:{new}", flush=True)
-        except Exception as e:
-            log(f"[יד2] שגיאה: {e}")
-            print("__RESULT__:0", flush=True)
-        finally:
-            browser.close()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                return s.connect_ex(("127.0.0.1", CDP_PORT)) == 0
+        except Exception:
+            return False
+
+    init_db()
+    with sync_playwright() as p:
+        if _cdp_alive():
+            log("[יד2 פרויקטים] מתחבר לדפדפן הקיים (CDP)...")
+            try:
+                browser = p.chromium.connect_over_cdp(f"http://localhost:{CDP_PORT}")
+                ctx = browser.contexts[0] if browser.contexts else browser.new_context(
+                    user_agent=UA, viewport={"width": 1280, "height": 800}
+                )
+                page = ctx.new_page()
+                page.add_init_script(STEALTH_SCRIPT)
+                try:
+                    new = scrape_yad2_projects(page, log=log)
+                    print(f"__RESULT__:{new}", flush=True)
+                except Exception as e:
+                    log(f"[יד2 פרויקטים] שגיאה: {e}")
+                    print("__RESULT__:0", flush=True)
+                finally:
+                    page.close()
+                return
+            except Exception as e:
+                log(f"[יד2 פרויקטים] חיבור CDP נכשל ({e}), עובר לפרופיל...")
+
+        if os.path.isdir(YAD2_PROFILE):
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=YAD2_PROFILE,
+                headless=False,
+                user_agent=UA,
+                viewport={"width": 1280, "height": 800},
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                ignore_default_args=["--enable-automation"],
+            )
+            page = context.new_page()
+            page.add_init_script(STEALTH_SCRIPT)
+            try:
+                new = scrape_yad2_projects(page, log=log)
+                print(f"__RESULT__:{new}", flush=True)
+            except Exception as e:
+                log(f"[יד2 פרויקטים] שגיאה: {e}")
+                print("__RESULT__:0", flush=True)
+            finally:
+                context.close()
+        else:
+            browser, context = make_browser(p)
+            page = context.new_page()
+            page.add_init_script(STEALTH_SCRIPT)
+            try:
+                new = scrape_yad2_projects(page, log=log)
+                print(f"__RESULT__:{new}", flush=True)
+            except Exception as e:
+                log(f"[יד2 פרויקטים] שגיאה: {e}")
+                print("__RESULT__:0", flush=True)
+            finally:
+                browser.close()
 
 
 if __name__ == "__main__":
@@ -183,6 +335,10 @@ if __name__ == "__main__":
         run_madlan()
     elif mode == "yad2":
         run_yad2()
+    elif mode == "yad2_projects":
+        run_yad2_projects()
+    elif mode == "dorin":
+        run_dorin()
     else:
         print(f"Unknown mode: {mode}", flush=True)
         sys.exit(1)

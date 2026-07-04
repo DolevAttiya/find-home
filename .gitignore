@@ -6,17 +6,20 @@ __pycache__/
 
 # Database & personal data
 *.db
+*.db.bak*
 apartment_images/
 
 # Sensitive session files
 fb_session.json
 madlan_profile/
+yad2_profile/
 *.json
 
 # Debug output files
 *.png
 *.html
 api_*.json
+*.log
 
 # IDE
 .vscode/

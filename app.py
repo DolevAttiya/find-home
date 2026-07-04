@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import yaml
 import json
@@ -13,6 +14,7 @@ from core.database import (
     init_db, get_apartments, get_groups, get_stats,
     mark_seen, update_note, mark_inactive,
 )
+from core.dedup import group_apartments
 
 st.set_page_config(page_title="חיפוש דירות", page_icon="🏠", layout="wide", initial_sidebar_state="expanded")
 
@@ -173,14 +175,18 @@ def _render_gallery(images: list):
 
 def _render_apt_detail(apt: dict, key_prefix: str = ""):
     post_id = (key_prefix + "_" if key_prefix else "") + (apt.get("post_id") or str(apt.get("id") or id(apt)))
+    member_ids = apt.get("_member_post_ids") or [apt.get("post_id")]
 
     # ── header badges ──
-    src_label = {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2"}.get(apt.get("source", ""), apt.get("source", ""))
+    src_names = {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2", "dorin": "דורין", "yad2_project": "יד2 פרויקט"}
+    src_label = " + ".join(src_names.get(s, s) for s in apt.get("source_list", [apt.get("source", "")]))
     days = _days_on_market(apt)
 
     badge_parts = []
     if src_label:
         badge_parts.append(f'<span class="badge-seen">{src_label}</span>')
+    if apt.get("group_size", 1) > 1:
+        badge_parts.append(f'<span class="badge-drop">🔗 נמצאה ב-{apt["group_size"]} מודעות</span>')
     if apt.get("seen"):
         badge_parts.append('<span class="badge-seen">👁 ראיתי</span>')
     if not apt.get("is_active", 1):
@@ -259,21 +265,25 @@ def _render_apt_detail(apt: dict, key_prefix: str = ""):
         seen = apt.get("seen", 0)
         if seen:
             if st.button("↩ בטל ראיתי", key=f"seen_{post_id}", use_container_width=True):
-                mark_seen(post_id, False)
+                for pid in member_ids:
+                    mark_seen(pid, False)
                 st.rerun()
         else:
             if st.button("✓ ראיתי", key=f"seen_{post_id}", type="primary", use_container_width=True):
-                mark_seen(post_id, True)
+                for pid in member_ids:
+                    mark_seen(pid, True)
                 st.rerun()
     with act2:
         active = apt.get("is_active", 1)
         if active:
             if st.button("🗑 סמן כהוסרה", key=f"inactive_{post_id}", use_container_width=True):
-                mark_inactive(post_id, active=False)
+                for pid in member_ids:
+                    mark_inactive(pid, active=False)
                 st.rerun()
         else:
             if st.button("↩ שחזר מודעה", key=f"inactive_{post_id}", use_container_width=True):
-                mark_inactive(post_id, active=True)
+                for pid in member_ids:
+                    mark_inactive(pid, active=True)
                 st.rerun()
 
     # ── notes ──
@@ -287,8 +297,20 @@ def _render_apt_detail(apt: dict, key_prefix: str = ""):
         placeholder="כתוב כאן הערות על הדירה הזו...",
     )
     if st.button("💾 שמור הערה", key=f"save_note_{post_id}"):
-        update_note(post_id, note_val)
+        for pid in member_ids:
+            update_note(pid, note_val)
         st.toast("הערה נשמרה!")
+
+    # ── merged listings ──
+    members = apt.get("_members") or []
+    if len(members) > 1:
+        with st.expander(f"📋 כל המודעות המקוריות ({len(members)})"):
+            for m in sorted(members, key=lambda m: m.get("scraped_at") or "", reverse=True):
+                m_src = src_names.get(m.get("source", ""), m.get("source", ""))
+                m_price = f"{int(m['price']):,} ₪" if m.get("price") else "-"
+                m_link = f" · [🔗 מודעה]({m['post_url']})" if m.get("post_url") else ""
+                m_phone = f" · 📞 {m['phone']}" if m.get("phone") else ""
+                st.markdown(f"- **{m_src}** — {m_price}{m_phone}{m_link}")
 
     # ── description ──
     if apt.get("text"):
@@ -319,6 +341,85 @@ def _render_apt_detail(apt: dict, key_prefix: str = ""):
             pass
     if images:
         _render_gallery(images)
+
+
+@st.dialog("פרטי דירה", width="large")
+def _apt_dialog(apt: dict):
+    st.subheader(apt.get("address") or "פרטי דירה")
+    _render_apt_detail(apt)
+
+
+def _render_apt_card(apt: dict):
+    post_id = apt.get("post_id") or str(id(apt))
+
+    with st.container(border=True):
+        images = []
+        if apt.get("images_json"):
+            try:
+                images = [p for p in json.loads(apt["images_json"]) if os.path.exists(p)]
+            except Exception:
+                pass
+        if images:
+            st.image(images[0], use_container_width=True)
+        else:
+            st.markdown(
+                "<div style='background:#f0f0f0;height:160px;border-radius:6px;"
+                "display:flex;align-items:center;justify-content:center;"
+                "font-size:2.2em;color:#bbb'>🏠</div>",
+                unsafe_allow_html=True,
+            )
+
+        src_names = {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2", "dorin": "דורין", "yad2_project": "יד2 פרויקט"}
+        src_label = " + ".join(src_names.get(s, s) for s in apt.get("source_list", [apt.get("source", "")]))
+        badge_line = f'<span class="badge-seen">{src_label}</span>'
+        if apt.get("group_size", 1) > 1:
+            badge_line += f' <span class="badge-drop">🔗×{apt["group_size"]}</span>'
+        status = _status_badges(apt)
+        if status:
+            badge_line += f" {status}"
+        st.markdown(badge_line, unsafe_allow_html=True)
+
+        price = apt.get("price")
+        orig = _orig_price(apt)
+        if price:
+            if orig and orig > price:
+                pct = (orig - price) / orig * 100
+                st.markdown(
+                    f"<div style='font-size:1.25em;font-weight:700;color:#2d7d46'>{int(price):,} ₪ "
+                    f"<span style='font-size:.6em;color:#c0392b'>📉 -{pct:.0f}%</span></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f"<div style='font-size:1.25em;font-weight:700'>{int(price):,} ₪</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown("<div style='font-size:1.1em;color:#888'>מחיר לא צוין</div>", unsafe_allow_html=True)
+
+        st.markdown(f"**{apt.get('address') or 'כתובת לא ידועה'}**")
+
+        facts = []
+        if apt.get("rooms"):    facts.append(f"{_fmt_rooms(apt['rooms'])} חד'")
+        if apt.get("size_sqm"): facts.append(f"{int(apt['size_sqm'])} מ\"ר")
+        if apt.get("floor"):    facts.append(f"קומה {apt['floor']}")
+        if facts:
+            st.caption(" · ".join(facts))
+
+        tags = []
+        if apt.get("has_mamad"):    tags.append('ממ"ד')
+        if apt.get("has_parking"):  tags.append("חניה")
+        if apt.get("has_balcony"):  tags.append("מרפסת")
+        if apt.get("has_elevator"): tags.append("מעלית")
+        if tags:
+            st.caption("✓ " + " · ".join(tags))
+
+        days = _days_on_market(apt)
+        if days is not None:
+            st.caption(f"⏱ {days} ימים בשוק")
+
+        if st.button("🔍 פרטים", key=f"card_{post_id}", use_container_width=True):
+            _apt_dialog(apt)
 
 
 def load_config():
@@ -375,7 +476,8 @@ if page == "תוצאות":
             has_mamad   = st.checkbox('✓ ממ"ד / מרחב מוגן')
             has_parking = st.checkbox("✓ חניה")
             has_balcony = st.checkbox("✓ מרפסת")
-            source_filter = st.selectbox("מקור", ["הכל", "פייסבוק", "מדלן", "יד2"])
+            source_filter = st.selectbox("מקור", ["הכל", "פייסבוק", "מדלן", "יד2", "דורין", "יד2 פרויקט"])
+            only_with_images = st.checkbox("📷 רק עם תמונות")
             st.markdown("---")
             hide_seen    = st.checkbox("הסתר דירות שראיתי 👁", value=False)
             show_inactive = st.checkbox("הצג מודעות שהוסרו 🚫", value=False)
@@ -391,123 +493,43 @@ if page == "תוצאות":
         "has_mamad":  has_mamad,
         "has_parking": has_parking,
         "has_balcony": has_balcony,
-        "source": {"הכל": None, "פייסבוק": "facebook", "מדלן": "madlan", "יד2": "yad2"}.get(source_filter),
+        "source": {"הכל": None, "פייסבוק": "facebook", "מדלן": "madlan", "יד2": "yad2", "דורין": "dorin", "יד2 פרויקט": "yad2_project"}.get(source_filter),
     }
 
     apartments_all = get_apartments(filters)
 
     # Python-level filters
-    apartments = [
+    apartments_raw = [
         a for a in apartments_all
         if (show_inactive or a.get("is_active", 1))
         and (not hide_seen or not a.get("seen"))
     ]
+    apartments = group_apartments(apartments_raw)
+    if only_with_images:
+        apartments = [a for a in apartments if a.get("images_json")]
 
-    st.subheader(f"נמצאו {len(apartments)} דירות")
+    merged_count = sum(1 for a in apartments if a.get("group_size", 1) > 1)
+    subtitle = f"נמצאו {len(apartments)} דירות"
+    if merged_count:
+        subtitle += f" (מתוך {len(apartments_raw)} מודעות, {merged_count} דירות אוחדו מכמה מקורות)"
+    st.subheader(subtitle)
 
     if apartments:
         df = pd.DataFrame(apartments)
 
-        tab_table, tab_map = st.tabs(["טבלה", "מפה"])
+        LOAD_BATCH = 24
+        st.session_state.setdefault("load_count", LOAD_BATCH)
 
-        with tab_table:
-            # ── build display columns ──
-            df_display = pd.DataFrame(apartments)
+        col_grid, col_map = st.columns([3, 2])
 
-            df_display["סטטוס"]  = [_status_badges(a) for a in apartments]
-            df_display["חד׳"]    = [_fmt_rooms(a.get("rooms")) for a in apartments]
-            df_display['מ"ר']    = [str(int(a["size_sqm"])) if a.get("size_sqm") else "-" for a in apartments]
-            df_display["מקור"]  = df_display["source"].map(
-                {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2"}
-            ).fillna(df_display["source"])
-            df_display["ימים"]  = [_days_on_market(a) for a in apartments]
-
-            def _price_col(apt):
-                p = apt.get("price")
-                if p is None:
-                    return "-"
-                orig = _orig_price(apt)
-                s = f"{int(p):,}"
-                if orig and orig > p:
-                    s += f" ↓{int(orig - p):,}"
-                return s
-
-            df_display["מחיר ₪"] = [_price_col(a) for a in apartments]
-
-            def fmt_bool3(series):
-                return series.map(lambda v: "✓" if v == 1 else ("✗" if v == 0 else "?"))
-
-            df_display['ממ"ד']  = fmt_bool3(df_display["has_mamad"])
-            df_display["חניה"]  = fmt_bool3(df_display["has_parking"])
-            df_display["מרפסת"] = fmt_bool3(df_display["has_balcony"])
-
-            visible_cols = ["סטטוס", "address", "מחיר ₪", "חד׳", 'מ"ר', "floor", "ימים", 'ממ"ד', "חניה", "מרפסת", "מקור"]
-            visible_cols = [c for c in visible_cols if c in df_display.columns]
-
-            col_rename = {
-                "address": "כתובת",
-                "floor":   "קומה",
-            }
-
-            # Row styling: new=green, price-drop=orange, inactive=red, seen=gray
-            def _row_style(row):
-                apt = apartments[row.name]
-                scraped = apt.get("scraped_at")
-                is_new = False
-                if scraped:
-                    try:
-                        is_new = pd.to_datetime(scraped).date() == TODAY
-                    except Exception:
-                        pass
-                orig = _orig_price(apt)
-                price_dropped = bool(orig and apt.get("price") and orig > apt["price"])
-
-                if not apt.get("is_active", 1):
-                    bg = "rgba(220,53,69,0.07)"
-                elif is_new and not apt.get("seen"):
-                    bg = "rgba(40,167,69,0.09)"
-                elif price_dropped:
-                    bg = "rgba(255,165,0,0.12)"
-                elif apt.get("seen"):
-                    bg = "rgba(0,0,0,0.04)"
-                else:
-                    bg = ""
-                return [f"background-color: {bg}"] * len(row)
-
-            styled = (
-                df_display[visible_cols]
-                .rename(columns=col_rename)
-                .style.apply(_row_style, axis=1)
-            )
-
-            col_detail, col_list = st.columns([3, 2])
-
-            with col_list:
-                st.caption(f"{len(apartments)} דירות — לחץ שורה לפרטים")
-                evt = st.dataframe(
-                    styled,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                    hide_index=True,
-                    use_container_width=True,
-                    height=680,
-                )
-
-            with col_detail:
-                sel_rows = evt.selection.rows if (evt and hasattr(evt, "selection")) else []
-                idx = sel_rows[0] if sel_rows else 0
-                apt = apartments[idx]
-                st.subheader(apt.get("address") or "פרטי דירה")
-                _render_apt_detail(apt)
-
-        with tab_map:
+        with col_map, st.container(key="map_sticky_container"):
             map_df = df[df["lat"].notna() & df["lon"].notna()].copy()
             if map_df.empty:
                 st.info("אין קואורדינטות עדיין — הן מחושבות אחרי הסריקה לפי כתובות שנמצאו בפוסטים.")
             else:
                 m = folium.Map(
                     location=[map_df["lat"].mean(), map_df["lon"].mean()],
-                    zoom_start=15,
+                    zoom_start=14,
                     tiles="OpenStreetMap",
                 )
                 for _, row in map_df.iterrows():
@@ -516,7 +538,7 @@ if page == "תוצאות":
                     size_str  = f"{int(row['size_sqm'])} מ״ר" if pd.notna(row.get("size_sqm")) and row.get("size_sqm") else ""
                     floor_str = f"קומה {row['floor']}" if row.get("floor") else ""
                     addr_str  = row.get("address") or ""
-                    source_str = {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2"}.get(row.get("source", ""), row.get("source", ""))
+                    source_str = {"facebook": "פייסבוק", "madlan": "מדלן", "yad2": "יד2", "dorin": "דורין", "yad2_project": "יד2 פרויקט"}.get(row.get("source", ""), row.get("source", ""))
 
                     tags = []
                     if row.get("has_mamad"):    tags.append('ממ"ד')
@@ -528,7 +550,6 @@ if page == "תוצאות":
                     link_html = (f'<a href="{row["post_url"]}" target="_blank" style="color:#e53e3e;">פתח מודעה ←</a>'
                                  if row.get("post_url") else "")
 
-                    # Days on market for popup
                     days = _days_on_market(row.to_dict())
                     days_str = f"{days} ימים בשוק" if days is not None else ""
 
@@ -557,19 +578,111 @@ if page == "תוצאות":
                         tooltip=f"{addr_str} | {price_str}",
                     ).add_to(m)
 
-                result = st_folium(m, width="100%", height=520, returned_objects=["last_object_clicked"])
-
-                clicked = result.get("last_object_clicked") if result else None
-                if clicked and isinstance(clicked, dict):
-                    clat, clng = clicked.get("lat"), clicked.get("lng")
-                    if clat and clng:
-                        dists = ((map_df["lat"] - clat)**2 + (map_df["lon"] - clng)**2)
-                        apt_row = map_df.loc[dists.idxmin()].to_dict()
-                        st.divider()
-                        st.subheader(apt_row.get("address") or "פרטי דירה")
-                        _render_apt_detail(apt_row, key_prefix="map")
-
+                st_folium(m, width="100%", height=680, returned_objects=[])
                 st.caption(f"{len(map_df)} דירות על המפה  |  ירוק = ראיתי")
+
+            # המפה "צפה" בזמן גלילה - CSS position:sticky לא עובד כאן כי
+            # ה-wrapper המיידי של Streamlit מתאים את גובהו לתוכן (למפה עצמה)
+            # ולא לגובה השורה המלאה, אז אין ל-sticky "מרחב" לזוז בתוכו.
+            # לכן fixed-positioning ידני ב-JS, מחושב מול הגלילה של stMain.
+            components.html("""
+            <script>
+            (function() {
+                const doc = window.parent.document;
+                const mainEl = doc.querySelector('[data-testid="stMain"]');
+                const wrapper = doc.querySelector('.st-key-map_sticky_container');
+                if (!mainEl || !wrapper) return;
+
+                // כל render מריץ iframe חדש (Streamlit יכול להרוס את הישן) -
+                // מחליפים את ה-listener הקודם בחדש במקום לצבור כפילויות או
+                // להישאר עם listener מת מ-iframe שכבר נהרס
+                if (mainEl._floatingMapHandler) {
+                    mainEl.removeEventListener('scroll', mainEl._floatingMapHandler);
+                }
+                if (window.parent._floatingMapResizeHandler) {
+                    window.parent.removeEventListener('resize', window.parent._floatingMapResizeHandler);
+                }
+
+                const TOP_OFFSET = 20;
+
+                // מודדים מחדש בכל scroll (לא שומרים מיקום בסיס פעם אחת) -
+                // תוכן שמתארך מתחת (עוד דירות שנטענות) יכול לשנות את המיקום
+                // הטבעי של המפה, אז מדידה חד-פעמית מתיישנת. מבטלים fixed
+                // זמנית כדי לקבל את המיקום האמיתי בזרימה הרגילה.
+                function onScroll() {
+                    const wasFixed = wrapper.style.position === 'fixed';
+                    if (wasFixed) wrapper.style.position = '';
+                    const rect = wrapper.getBoundingClientRect();
+
+                    if (rect.top <= TOP_OFFSET) {
+                        wrapper.style.position = 'fixed';
+                        wrapper.style.top = TOP_OFFSET + 'px';
+                        wrapper.style.left = rect.left + 'px';
+                        wrapper.style.width = rect.width + 'px';
+                        wrapper.style.zIndex = 999;
+                    } else if (wasFixed) {
+                        wrapper.style.position = '';
+                        wrapper.style.top = '';
+                        wrapper.style.left = '';
+                        wrapper.style.width = '';
+                        wrapper.style.zIndex = '';
+                    }
+                }
+                mainEl._floatingMapHandler = onScroll;
+                window.parent._floatingMapResizeHandler = onScroll;
+                mainEl.addEventListener('scroll', onScroll);
+                window.parent.addEventListener('resize', onScroll);
+                onScroll();
+            })();
+            </script>
+            """, height=1)
+
+        with col_grid:
+            load_count = st.session_state["load_count"]
+            visible_apts = apartments[:load_count]
+            has_more = load_count < len(apartments)
+
+            for row_start in range(0, len(visible_apts), 2):
+                pair = visible_apts[row_start:row_start + 2]
+                cols = st.columns(2)
+                for col, apt in zip(cols, pair):
+                    with col:
+                        _render_apt_card(apt)
+
+            if has_more:
+                if st.button("⬇ טען עוד", key="_infinite_load_more", use_container_width=True):
+                    st.session_state["load_count"] += LOAD_BATCH
+                    st.rerun()
+
+                # גלילה כמעט עד לכפתור "טען עוד" מפעילה אותו אוטומטית - מדמה
+                # infinite scroll. חייב components.v1.html (לא st.html) כי
+                # st.html מכניס תוכן דרך innerHTML שלא מריץ <script> בכלל;
+                # components.html יוצר iframe אמיתי עם srcdoc שבו script רץ.
+                # בדיקת מיקום ב-polling דרך window.frameElement (לא
+                # IntersectionObserver) כי חציית גבול iframe עם root:null לא
+                # אמינה בין דפדפנים. חייב תוכן ייחודי בכל render (load_count)
+                # כדי שהאלמנט לא יחשב "זהה" ולא יטען מחדש.
+                components.html(f"""
+                <div data-load-count="{load_count}"></div>
+                <script>
+                (function() {{
+                    let triggered = false;
+                    const check = () => {{
+                        if (triggered) return;
+                        const rect = window.frameElement.getBoundingClientRect();
+                        if (rect.top < window.parent.innerHeight + 600) {{
+                            triggered = true;
+                            clearInterval(timer);
+                            const btn = Array.from(window.parent.document.querySelectorAll('button'))
+                                .find(b => b.innerText.trim() === '⬇ טען עוד');
+                            if (btn) btn.click();
+                        }}
+                    }};
+                    const timer = setInterval(check, 300);
+                    check();
+                }})();
+                </script>
+                """, height=1)
     else:
         st.info("לא נמצאו דירות — נסה להרחיב את המסננים או להריץ סריקה")
 
@@ -631,6 +744,13 @@ elif page == "הגדרות":
         only_price = st.checkbox("רק פוסטים עם מחיר", config["מחיר"].get("רק_פוסטים_עם_מחיר", True))
         scan_hours = st.number_input("סריקה אוטומטית כל X שעות", 1, 24, config["סריקה"].get("כל_כמה_שעות", 2))
 
+    st.subheader("מקורות סריקה")
+    include_facebook = st.checkbox(
+        "כלול פייסבוק בסריקה",
+        config["סריקה"].get("כלול_פייסבוק", True),
+        help="בטל אם פייסבוק חוסם את הסריקה — הסריקה תרוץ רק על מדלן ויד2",
+    )
+
     st.subheader("מילות מפתח")
     required_raw = st.text_area(
         "מילות חובה (כל שורה = מילה, ריק = בלי חובה)",
@@ -649,6 +769,7 @@ elif page == "הגדרות":
         config["מילות_מפתח_חובה"] = [l.strip() for l in required_raw.splitlines() if l.strip()]
         config["מילות_חסימה"]  = [l.strip() for l in blocked_raw.splitlines() if l.strip()]
         config["סריקה"]["כל_כמה_שעות"] = scan_hours
+        config["סריקה"]["כלול_פייסבוק"] = include_facebook
         save_config(config)
         st.success("ההגדרות נשמרו!")
 

@@ -123,16 +123,20 @@ def save_apartment(data: dict) -> bool:
             ))
             return True
         except sqlite3.IntegrityError:
-            # Existing listing — check for price change and refresh last_seen_at
+            # Existing listing — check for price change, backfill missing images, refresh last_seen_at
             post_id = data.get("post_id")
             new_price = data.get("price")
+            new_images = data.get("images_json")
             if post_id:
                 row = conn.execute(
-                    "SELECT price, original_price FROM apartments WHERE post_id = ?",
+                    "SELECT price, original_price, images_json FROM apartments WHERE post_id = ?",
                     (post_id,)
                 ).fetchone()
                 if row:
-                    old_price, orig_price = row
+                    old_price, orig_price, old_images = row
+                    # לא דורסים תמונות קיימות - רק משלימים אם עדיין אין שום תמונה
+                    images_to_set = new_images if (new_images and not old_images) else old_images
+
                     if new_price and old_price is not None and old_price != new_price:
                         if orig_price is None:
                             orig_price = old_price
@@ -141,13 +145,13 @@ def save_apartment(data: dict) -> bool:
                             (post_id, old_price, new_price, now),
                         )
                         conn.execute(
-                            "UPDATE apartments SET price = ?, original_price = ?, last_seen_at = ?, is_active = 1 WHERE post_id = ?",
-                            (new_price, orig_price, now, post_id),
+                            "UPDATE apartments SET price = ?, original_price = ?, images_json = ?, last_seen_at = ?, is_active = 1 WHERE post_id = ?",
+                            (new_price, orig_price, images_to_set, now, post_id),
                         )
                     else:
                         conn.execute(
-                            "UPDATE apartments SET last_seen_at = ?, is_active = 1 WHERE post_id = ?",
-                            (now, post_id),
+                            "UPDATE apartments SET images_json = ?, last_seen_at = ?, is_active = 1 WHERE post_id = ?",
+                            (images_to_set, now, post_id),
                         )
             return False
 

@@ -41,7 +41,10 @@ def download_images(post_id: str, urls: list, referer: str = "") -> list:
 
             if not path.exists():
                 r = requests.get(url, headers=headers, timeout=15)
-                if r.status_code == 200:
+                content_type = r.headers.get("Content-Type", "")
+                # מוודאים שזו באמת תמונת רסטר, לא placeholder svg שמוגש
+                # לפעמים במקום תמונה שעדיין לא נטענה (lazy loading)
+                if r.status_code == 200 and content_type.startswith("image/") and "svg" not in content_type:
                     path.write_bytes(r.content)
 
             if path.exists():

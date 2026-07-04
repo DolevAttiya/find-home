@@ -75,6 +75,29 @@ def passes_config_filters(data: dict, config: dict) -> bool:
     return True
 
 
+def _radware_challenge_active(page: Page) -> bool:
+    try:
+        return "radware" in (page.title() or "").lower()
+    except Exception:
+        return False
+
+
+def _wait_out_radware(page: Page, log, timeout_s: int = 25) -> bool:
+    """Radware מציג challenge אוטומטי מבוסס JS (לא אינטראקטיבי כמו PerimeterX
+    במדלן) - נפתר לבד תוך כמה שניות אם הדפדפן עובר את בדיקות ה-fingerprint.
+    מחזיר True אם החסימה נעלמה, False אם זו חסימה קשה שדורשת פתרון ידני."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        time.sleep(1.5)
+        if not _radware_challenge_active(page):
+            try:
+                page.wait_for_load_state("networkidle", timeout=10_000)
+            except Exception:
+                pass
+            return True
+    return False
+
+
 def scrape_yad2(page: Page, log=None) -> int:
     config = load_config()
     new_count = 0
@@ -101,6 +124,15 @@ def scrape_yad2(page: Page, log=None) -> int:
         _log("יד2: timeout בטעינת הדף")
         return 0
 
+    if _radware_challenge_active(page):
+        _log("יד2: זוהתה חסימת Radware ('Verifying your browser...') - ממתין לפתרון אוטומטי...")
+        if _wait_out_radware(page, _log):
+            _log("יד2: החסימה נפתרה, ממשיך")
+        else:
+            _log("יד2: החסימה לא נפתרה - כנראה חסימה קשה. "
+                  "הרץ setup/start_yad2_browser.py ופתור ידנית בדפדפן שם.")
+            return 0
+
     html_size = len(page.content())
     if html_size < 20000:
         _log(f"יד2: דף קטן ({html_size} תווים) - ייתכן חסימת בוט, מדלג")
@@ -109,7 +141,12 @@ def scrape_yad2(page: Page, log=None) -> int:
     CARD_SEL = "[data-testid='item-basic'], [data-testid='agency-item']"
     max_pages = 10
 
-    # בנה מפת token → images מתוך __NEXT_DATA__
+    # מפת token → גלריית תמונות מלאה, מתוך __NEXT_DATA__. זהו snapshot סטטי
+    # מהטעינה הראשונית של הדף (Next.js לא מעדכן אותו בניווט/גלילה מצד הלקוח),
+    # אז זה בעצם מכסה רק את הכרטיסיות שהיו ב-SSR הראשוני - לא עמוד 2+.
+    # לכן זה fallback טוב (גלריה מלאה) כשקיים, ולא המקור היחיד לתמונות -
+    # לכל כרטיסייה יש גם תמונה בודדת ב-DOM עצמו (card_img_src בהמשך) שעובדת
+    # בכל עמוד בלי תלות ב-token.
     token_images: dict = {}
     try:
         nd = page.evaluate("() => window.__NEXT_DATA__")
@@ -127,7 +164,7 @@ def scrape_yad2(page: Page, log=None) -> int:
                 for item in obj:
                     _collect(item, depth + 1)
         _collect(nd)
-        _log(f"יד2: נמצאו תמונות ל-{len(token_images)} מודעות מ-__NEXT_DATA__")
+        _log(f"יד2: נמצאו גלריות מלאות ל-{len(token_images)} מודעות (מהטעינה הראשונית) מ-__NEXT_DATA__")
     except Exception as e:
         _log(f"יד2: לא ניתן לחלץ __NEXT_DATA__: {e}")
 
@@ -153,10 +190,11 @@ def scrape_yad2(page: Page, log=None) -> int:
 
                 # תאריך פרסום — מחולץ מ-URL התמונה הראשית: /Pic/YYYYMM/DD/
                 posted_at = None
+                card_img_src = None
                 img_el = card.query_selector("img[data-testid='image']")
                 if img_el:
-                    img_src = img_el.get_attribute("src") or ""
-                    dm = re.search(r"/Pic/(\d{4})(\d{2})/(\d{2})/", img_src)
+                    card_img_src = img_el.get_attribute("src") or None
+                    dm = re.search(r"/Pic/(\d{4})(\d{2})/(\d{2})/", card_img_src or "")
                     if dm:
                         posted_at = f"{dm.group(1)}-{dm.group(2)}-{dm.group(3)}"
 
@@ -219,8 +257,10 @@ def scrape_yad2(page: Page, log=None) -> int:
                 has_balcony  = _tag(['מרפסת'])
                 has_elevator = _tag(['מעלית'])
 
-                # תמונות — מתוך __NEXT_DATA__ (ללא טעינת עמוד נוסף)
-                img_urls = token_images.get(token, [])
+                # תמונות — מ-__NEXT_DATA__ (גלריה מלאה, קיים רק לעמוד הראשון בפועל
+                # כי זה snapshot סטטי מהטעינה הראשונית) - ואם אין, לפחות התמונה
+                # הבודדת שמוצגת בכרטיסייה עצמה (עובד בכל עמוד, בלי תלות ב-token)
+                img_urls = token_images.get(token) or ([card_img_src] if card_img_src else [])
                 local_imgs = download_images(
                     f"yad2_{token or hash(post_url)}",
                     img_urls,

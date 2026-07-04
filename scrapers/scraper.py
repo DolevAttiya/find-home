@@ -345,6 +345,7 @@ def run_scrape(status_callback=None) -> dict:
     config = load_config()
     results = {"new_apartments": 0, "groups_scanned": 0, "errors": []}
     FB_PARALLEL = 4  # כמה קבוצות פייסבוק במקביל
+    include_facebook = config.get("סריקה", {}).get("כלול_פייסבוק", True)
 
     def log(msg):
         if status_callback:
@@ -352,46 +353,52 @@ def run_scrape(status_callback=None) -> dict:
         else:
             print(msg, flush=True)
 
-    if not has_session():
-        raise Exception("לא נמצא session - הרץ תחילה: python save_session.py")
+    all_groups = []
+    if include_facebook:
+        if not has_session():
+            raise Exception("לא נמצא session - הרץ תחילה: python save_session.py")
 
-    # --- Phase 1: כניסה לפייסבוק + מציאת קבוצות (sequential) ---
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(
-            storage_state=SESSION_PATH,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-        )
-        page = context.new_page()
-        try:
-            log("מאמת חיבור לפייסבוק...")
-            if not verify_logged_in(page):
-                raise Exception("ה-session פג תוקף - הרץ שוב: python save_session.py")
+        # --- Phase 1: כניסה לפייסבוק + מציאת קבוצות (sequential) ---
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context(
+                storage_state=SESSION_PATH,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+            )
+            page = context.new_page()
+            try:
+                log("מאמת חיבור לפייסבוק...")
+                if not verify_logged_in(page):
+                    raise Exception("ה-session פג תוקף - הרץ שוב: python save_session.py")
 
-            log("מחפש קבוצות רלוונטיות...")
-            found_groups = search_groups(page, config)
-            log(f"נמצאו {len(found_groups)} קבוצות")
-            for g in found_groups:
-                save_group(g)
-        except Exception as e:
-            results["errors"].append(str(e))
-            browser.close()
-            return results
-        finally:
-            browser.close()
+                log("מחפש קבוצות רלוונטיות...")
+                found_groups = search_groups(page, config)
+                log(f"נמצאו {len(found_groups)} קבוצות")
+                for g in found_groups:
+                    save_group(g)
+            except Exception as e:
+                results["errors"].append(str(e))
+                browser.close()
+                return results
+            finally:
+                browser.close()
 
-    existing_groups = get_groups()
-    all_groups = list({g["group_id"]: g for g in existing_groups}.values())
+        existing_groups = get_groups()
+        all_groups = list({g["group_id"]: g for g in existing_groups}.values())
+    else:
+        log("פייסבוק מדולג (כלול_פייסבוק: false ב-config.yaml)")
 
     # --- Phase 2: סריקה מקבילית ---
-    log(f"מתחיל סריקה מקבילית ({FB_PARALLEL} קבוצות + מדלן + יד2)...")
+    log(f"מתחיל סריקה מקבילית ({len(all_groups)} קבוצות + מדלן + יד2 + יד2 פרויקטים + דורין)...")
 
     tasks = {}  # future → label
-    with ThreadPoolExecutor(max_workers=FB_PARALLEL + 2) as pool:
-        # מדלן ויד2 קודם — כדי שיתפסו slot מיד ולא יחכו בתור אחרי 60+ קבוצות פייסבוק
+    with ThreadPoolExecutor(max_workers=FB_PARALLEL + 4) as pool:
+        # מדלן, יד2 ודורין קודם — כדי שיתפסו slot מיד ולא יחכו בתור אחרי 60+ קבוצות פייסבוק
         tasks[pool.submit(_launch_worker, ["madlan"])] = "מדלן"
         tasks[pool.submit(_launch_worker, ["yad2"])] = "יד2"
+        tasks[pool.submit(_launch_worker, ["yad2_projects"])] = "יד2 פרויקטים"
+        tasks[pool.submit(_launch_worker, ["dorin"])] = "דורין"
 
         # פייסבוק - FB_PARALLEL קבוצות במקביל
         for group in all_groups:

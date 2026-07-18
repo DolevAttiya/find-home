@@ -191,6 +191,7 @@ def run_komo():
 def run_yad2():
     from core.database import init_db
     from scrapers.yad2_scraper import scrape_yad2
+    from setup.start_yad2_browser import ensure_running
     import os, socket
 
     YAD2_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "yad2_profile")
@@ -209,11 +210,12 @@ def run_yad2():
             return False
 
     init_db()
+    # יד2 מגנה עם Radware (challenge "Verifying your browser...") - הדפדפן
+    # הייעודי (Edge עם פרופיל שכבר עבר את הבדיקה) עובר את זה הרבה יותר טוב
+    # מפרופיל נקי. מוודאים שהוא רץ (מפעילים אם צריך, למשל אחרי ש-Edge סגר
+    # את עצמו בעדכון גרסה) - לא צריך יותר להריץ setup/start_yad2_browser.py ידנית.
+    ensure_running(log=log)
     with sync_playwright() as p:
-        # יד2 מגנה עם Radware (challenge "Verifying your browser...") - הדפדפן
-        # האמיתי של המשתמש (Edge, עם הפרופיל האמיתי) עובר את זה הרבה יותר טוב
-        # מפרופיל נקי. לא מפעילים אותו כאן אוטומטית - זה דורש לסגור קודם את
-        # Edge הפתוח, וזה משהו שהמשתמש צריך לעשות ביודעין (setup/start_yad2_browser.py)
         if _cdp_alive():
             log("[יד2] מתחבר לדפדפן הקיים (CDP)...")
             try:
@@ -280,6 +282,7 @@ def run_yad2_projects():
     מהם). כל מקור-סריקה צריך תיקיית fallback משלו."""
     from core.database import init_db
     from scrapers.yad2_projects_scraper import scrape_yad2_projects
+    from setup.start_yad2_browser import ensure_running
     import os, socket
 
     YAD2_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "yad2_projects_profile")
@@ -298,6 +301,9 @@ def run_yad2_projects():
             return False
 
     init_db()
+    # ensure_running() בטוח לקרוא גם משני ה-workers (יד2 + יד2 פרויקטים) בו-זמנית -
+    # יש לה נעילת קובץ פנימית שמונעת משניהם להפעיל Edge במקביל (ר' התיעוד שם).
+    ensure_running(log=log)
     with sync_playwright() as p:
         if _cdp_alive():
             log("[יד2 פרויקטים] מתחבר לדפדפן הקיים (CDP)...")

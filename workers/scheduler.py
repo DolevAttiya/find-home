@@ -1,10 +1,12 @@
 import sys
 import os
+import io
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 import schedule
 import time
 import yaml
-import threading
 from scrapers.scraper import run_scrape
 
 

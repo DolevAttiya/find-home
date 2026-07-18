@@ -84,6 +84,33 @@ def _merge_cluster(members: list[dict]) -> dict:
                     merged[field] = m[field]
                     break
 
+    # נוחיות (has_mamad/has_parking/has_balcony/has_elevator) - 0/1/None
+    # (ראה _bool3 ב-database.py), אז לא ניתן להשתמש ב"not merged.get(field)"
+    # כמו למעלה - 0 הוא falsy אבל הוא תשובה ודאית ("אין"), לא "לא ידוע".
+    # ממלאים ממקור אחר רק כשה-primary עדיין None (לא ידוע) - לעולם לא דורסים
+    # "אין" מפורש עם "יש" ממקור פחות אמין. אומת ידנית: מודעה שמוזגה עם עותק
+    # שאיבד את הנתון (יד2 בד"כ) הייתה מציגה נוחיות ריקות למרות שהעותק השני
+    # (מדלן) כן ידע עליהן.
+    for field in ("has_mamad", "has_parking", "has_balcony", "has_elevator"):
+        if merged.get(field) is None:
+            for m in members:
+                if m.get(field) is not None:
+                    merged[field] = m[field]
+                    break
+
+    # מחיר - הנמוך מבין החברים (ייתכן שמקור אחד עדיין לא עדכן ירידת מחיר),
+    # ותאריך פרסום - המוקדם מביניהם (כך ש"ימים בשוק" משקף מתי היא באמת עלתה)
+    prices = [m["price"] for m in members if m.get("price")]
+    if prices:
+        merged["price"] = min(prices)
+        peak_prices = [m.get("original_price") or m.get("price") for m in members if m.get("original_price") or m.get("price")]
+        if peak_prices and max(peak_prices) > merged["price"]:
+            merged["original_price"] = max(peak_prices)
+
+    posted_dates = [m["posted_at"] for m in members if m.get("posted_at")]
+    if posted_dates:
+        merged["posted_at"] = min(posted_dates)
+
     all_images, seen_paths = [], set()
     for m in members:
         if not m.get("images_json"):
@@ -99,6 +126,7 @@ def _merge_cluster(members: list[dict]) -> dict:
 
     merged["seen"] = 1 if any(m.get("seen") for m in members) else 0
     merged["is_active"] = 1 if any(m.get("is_active", 1) for m in members) else 0
+    merged["not_relevant"] = 1 if any(m.get("not_relevant") for m in members) else 0
 
     return merged
 
@@ -189,6 +217,17 @@ def group_apartments(apartments: list[dict]) -> list[dict]:
         return []
 
     uf = _UnionFind(a["post_id"] for a in apartments)
+
+    # איחוד ידני (המשתמש קבע בעצמו שאלה אותה דירה) - קודם לכל היוריסטיקה,
+    # תמיד מכבדים אותו בלי תנאים
+    by_manual_group: dict[str, list[dict]] = {}
+    for apt in apartments:
+        mg = apt.get("manual_group")
+        if mg:
+            by_manual_group.setdefault(mg, []).append(apt)
+    for group in by_manual_group.values():
+        for other in group[1:]:
+            uf.union(group[0]["post_id"], other["post_id"])
 
     _cluster_by_strong_address(uf, apartments)
 

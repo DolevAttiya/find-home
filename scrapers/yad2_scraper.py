@@ -13,14 +13,31 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def build_search_url(config: dict) -> str:
+def _locations(config: dict) -> list[str]:
+    """"מיקום" ב-config יכול להיות עיר בודדת (str) או רשימת ערים - כדי
+    לתמוך בחיפוש בכמה ערים במקביל (למשל גבעתיים + רמת גן) בלי לשבור את
+    הפורמט הישן (עיר בודדת)."""
+    loc = config.get("חיפוש", {}).get("מיקום") or "גבעתיים"
+    return loc if isinstance(loc, list) else [loc]
+
+
+# מזהי ערים ביד2 (topArea=2/area=3 = גוש דן, נכון לשתיהן). city=6300 היה
+# מקובע בקוד במקום להישען על "מיקום" מה-config - שינוי "מיקום" לא היה
+# משפיע על יד2 בכלל.
+YAD2_CITY_IDS = {
+    "גבעתיים": 6300,
+    "רמת גן": 8600,
+}
+
+
+def build_search_url(config: dict, city: str) -> str:
     cfg_rooms = config.get("חדרים", {})
 
     min_rooms = cfg_rooms.get("מינימום") or 0
     max_rooms = cfg_rooms.get("מקסימום") or 0
 
-    # city=6300 = Givataim, topArea=2, area=3, property=1 = apartments
-    params = "?topArea=2&area=3&city=6300&property=1"
+    city_id = YAD2_CITY_IDS.get(city, YAD2_CITY_IDS["גבעתיים"])
+    params = f"?topArea=2&area=3&city={city_id}&property=1"
     if min_rooms and max_rooms:
         params += f"&rooms={min_rooms}-{max_rooms}"
     elif min_rooms:
@@ -41,10 +58,8 @@ def parse_price(text: str) -> int | None:
 
 
 def passes_city_filter(card_text: str, config: dict) -> bool:
-    location = config.get("חיפוש", {}).get("מיקום", "")
-    if not location:
-        return True
-    return location in card_text
+    locations = _locations(config)
+    return any(loc in card_text for loc in locations)
 
 
 def passes_config_filters(data: dict, config: dict) -> bool:
@@ -98,8 +113,7 @@ def _wait_out_radware(page: Page, log, timeout_s: int = 25) -> bool:
     return False
 
 
-def scrape_yad2(page: Page, log=None) -> int:
-    config = load_config()
+def _scrape_yad2_city(page: Page, config: dict, city: str, log=None) -> int:
     new_count = 0
 
     def _log(msg):
@@ -114,8 +128,8 @@ def scrape_yad2(page: Page, log=None) -> int:
     except Exception:
         pass
 
-    url = build_search_url(config)
-    _log(f"יד2: נכנס לדף {url}")
+    url = build_search_url(config, city)
+    _log(f"יד2 [{city}]: נכנס לדף {url}")
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -252,7 +266,9 @@ def scrape_yad2(page: Page, log=None) -> int:
                 def _tag(keywords):
                     return True if any(w in t for t in tags for w in keywords) else None
 
-                has_mamad    = _tag(['ממ"ד', 'ממד', 'מרחב מוגן'])
+                # יד2 כותב "ממ״ד" עם גרשיים (U+05F4) בתגיות - אומת ידנית מול
+                # הדף החי - לא מרכאה רגילה. אותה בעיה שהייתה במדלן.
+                has_mamad    = _tag(['ממ"ד', "ממ״ד", "ממ׳ד", 'ממד', 'מרחב מוגן'])
                 has_parking  = _tag(['חניה', 'חנייה', 'פרקינג'])
                 has_balcony  = _tag(['מרפסת'])
                 has_elevator = _tag(['מעלית'])
@@ -332,5 +348,13 @@ def scrape_yad2(page: Page, log=None) -> int:
         except Exception:
             break
 
-    _log(f"יד2: סה\"כ {new_count} דירות חדשות נשמרו")
+    _log(f"יד2 [{city}]: סה\"כ {new_count} דירות חדשות נשמרו")
+    return new_count
+
+
+def scrape_yad2(page: Page, log=None) -> int:
+    config = load_config()
+    new_count = 0
+    for city in _locations(config):
+        new_count += _scrape_yad2_city(page, config, city, log=log)
     return new_count

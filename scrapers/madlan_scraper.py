@@ -4,6 +4,7 @@ import json
 import time
 import random
 import yaml
+from urllib.parse import quote, urlsplit, urlunsplit, parse_qsl, urlencode
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
 from core.database import save_apartment, update_amenities
 from core.image_utils import download_images
@@ -13,6 +14,33 @@ MADLAN_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 RESALE_URL   = "https://www.madlan.co.il/for-sale/%D7%92%D7%91%D7%A2%D7%AA%D7%99%D7%99%D7%9D-%D7%99%D7%A9%D7%A8%D7%90%D7%9C?dealType=secondHand"
 PROJECTS_URL = "https://www.madlan.co.il/for-sale/%D7%92%D7%91%D7%A2%D7%AA%D7%99%D7%99%D7%9D-%D7%99%D7%A9%D7%A8%D7%90%D7%9C"
 IMG_BASE     = "https://images2.madlan.co.il/t:nonce:v=2/"
+
+
+def _locations(config: dict) -> list[str]:
+    """"מיקום" ב-config יכול להיות עיר בודדת (str) או רשימת ערים - כדי
+    לתמוך בחיפוש בכמה ערים במקביל (למשל גבעתיים + רמת גן) בלי לשבור את
+    הפורמט הישן (עיר בודדת)."""
+    loc = config.get("חיפוש", {}).get("מיקום") or "גבעתיים"
+    return loc if isinstance(loc, list) else [loc]
+
+
+def _build_search_url(config: dict, city: str) -> str:
+    """בונה את כתובת החיפוש במדלן לפי עיר נתונה, כדי שהחלפת/הוספת עיר
+    בקונפיג תשנה בפועל את מה שנסרק (במקום ה-URL הקבוע שהיה שמור מראש עם
+    bbox מקודד ידנית שתאם רק לגבעתיים - שינוי "מיקום" בקונפיג לא היה
+    משפיע על מדלן בכלל, כי ה-URL השתמש תמיד באותו bbox ישן).
+    שומרים את שאר הפילטרים (מחיר/חדרים/נוחות, ב-filters=) כמו שהם מה-URL
+    השמור, כי הם לא תלויי-עיר - רק את חלק ה-city-slug ב-path ומסירים את
+    ה-bbox (שכן תלוי-עיר וישאיר את החיפוש נעול לתיבת הגבולות הישנה)."""
+    base = config.get("חיפוש", {}).get("madlan_url") or RESALE_URL
+
+    parts = urlsplit(base)
+    # מדלן משתמש במקף גם בין מילות שם העיר עצמו, לא רק לפני "ישראל"
+    # (למשל "רמת-גן-ישראל", לא "רמת גן-ישראל") - אומת מול ה-URL האמיתי באתר.
+    city_slug = city.replace(" ", "-")
+    new_path = f"/for-sale/{quote(f'{city_slug}-ישראל')}"
+    query_pairs = [(k, v) for k, v in parse_qsl(parts.query) if k != "bbox"]
+    return urlunsplit((parts.scheme, parts.netloc, new_path, urlencode(query_pairs), ""))
 
 
 class CaptchaBlocked(Exception):
@@ -196,6 +224,24 @@ def _extract_number(text: str, pattern: str):
         return None
 
 
+def _amenity_match(body_text: str, keywords: list) -> int | None:
+    """מדלן כותב נוחיות כטקסט חופשי בסקציית "יתרונות הנכס"/"מפרט מלא" (בלי
+    ✓/✗ בד"כ). הימצאות מילת מפתח בדף = יש את הנוחיות. ✓/✗ (בסגנון פייסבוק)
+    נתמכים כ-fallback אם קיימים. פונקציה top-level (לא closure) כדי שגם
+    סקריפט backfill יוכל לייבא ולהשתמש באותה לוגיקה בדיוק כמו הסריקה החיה."""
+    for kw in keywords:
+        idx = body_text.find(kw)
+        if idx == -1:
+            continue
+        surrounding = body_text[max(0, idx - 30): idx + 30]
+        if "✓" in surrounding or "✔" in surrounding:
+            return 1
+        if "✗" in surrounding or "✘" in surrounding or "×" in surrounding:
+            return 0
+        return 1
+    return None  # לא נמצא כלל
+
+
 def _scrape_listing_page(page: Page, url: str, log,
                          _solver=None) -> dict | None:
     """מבקר בדף מודעה ומחלץ את כל הנתונים מה-DOM"""
@@ -333,28 +379,14 @@ def _scrape_listing_page(page: Page, url: str, log,
             except Exception:
                 floor = v
 
-    # --- נוחיות ---
-    # Madlan lists amenities as plain text in "מפרט מלא" section (no ✓/✗).
-    # Presence of keyword anywhere in page = has it.
-    # ✓/✗ marks (Facebook-style) are also supported as fallback.
-    def _amenity(keywords: list) -> int | None:
-        for kw in keywords:
-            idx = body_text.find(kw)
-            if idx == -1:
-                continue
-            surrounding = body_text[max(0, idx - 30): idx + 30]
-            if "✓" in surrounding or "✔" in surrounding:
-                return 1
-            if "✗" in surrounding or "✘" in surrounding or "×" in surrounding:
-                return 0
-            # No checkmarks → presence of keyword = has amenity
-            return 1
-        return None  # לא נמצא כלל
-
-    has_parking  = _amenity(["חניה", "חנייה", "פרקינג"])
-    has_mamad    = _amenity(['ממ"ד', "ממד", "מרחב מוגן"])
-    has_balcony  = _amenity(["מרפסת", "מרפסת שמש", "טרסה"])
-    has_elevator = _amenity(["מעלית"])
+    # --- נוחיות (ראה _amenity_match למעלה) ---
+    has_parking  = _amenity_match(body_text, ["חניה", "חנייה", "פרקינג"])
+    # מדלן כותב "ממ״ד" עם גרשיים (U+05F4) בסקציית "יתרונות הנכס" - לא מרכאה
+    # רגילה - אז חייבים את שני הווריאנטים (וגם גרש בודד ליתר ביטחון), אותו
+    # דפוס הגנתי שכבר קיים למ"ר בשורה 311
+    has_mamad    = _amenity_match(body_text, ['ממ"ד', "ממ״ד", "ממ׳ד", "ממד", "מרחב מוגן"])
+    has_balcony  = _amenity_match(body_text, ["מרפסת", "מרפסת שמש", "טרסה"])
+    has_elevator = _amenity_match(body_text, ["מעלית"])
 
     # --- תמונות ---
     img_urls = page.evaluate("""() => {
@@ -440,11 +472,16 @@ def scrape_madlan(page: Page, log=None) -> int:
     except Exception as e:
         pass
 
-    # --- שלב 1: איסוף קישורים ---
-    # Use config madlan_url if provided (has pre-applied filters), else fallback
-    search_url = config.get("חיפוש", {}).get("madlan_url") or RESALE_URL
-    _log(f"מדלן: סורק מודעות ({search_url[:60]}...)")
-    urls = _collect_urls(page, search_url, _log, max_listings=60)
+    # --- שלב 1: איסוף קישורים (לכל עיר מוגדרת בנפרד, מאוחדים לרשימה אחת) ---
+    urls = []
+    seen_urls = set()
+    for city in _locations(config):
+        search_url = _build_search_url(config, city)
+        _log(f"מדלן [{city}]: סורק מודעות ({search_url[:60]}...)")
+        for u in _collect_urls(page, search_url, _log, max_listings=60):
+            if u not in seen_urls:
+                seen_urls.add(u)
+                urls.append(u)
 
     if not urls:
         _log("מדלן: לא נמצאו מודעות")

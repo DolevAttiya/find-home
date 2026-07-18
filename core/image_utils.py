@@ -12,6 +12,8 @@ IMG_DIR.mkdir(exist_ok=True)
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
+MIN_IMAGE_BYTES = 2000  # מתחת לזה זה placeholder/פיקסל בודד, לא תמונת דירה אמיתית
+
 
 def download_images(post_id: str, urls: list, referer: str = "") -> list:
     """
@@ -43,8 +45,13 @@ def download_images(post_id: str, urls: list, referer: str = "") -> list:
                 r = requests.get(url, headers=headers, timeout=15)
                 content_type = r.headers.get("Content-Type", "")
                 # מוודאים שזו באמת תמונת רסטר, לא placeholder svg שמוגש
-                # לפעמים במקום תמונה שעדיין לא נטענה (lazy loading)
-                if r.status_code == 200 and content_type.startswith("image/") and "svg" not in content_type:
+                # לפעמים במקום תמונה שעדיין לא נטענה (lazy loading). בנוסף
+                # MIN_IMAGE_BYTES: נמצאו בפועל תמונות "placeholder" של פיקסל
+                # 1x1 שחור (43 בייט, Content-Type תקין) ש-madlan מגיש לפני
+                # שהתמונה האמיתית נטענת - עוברות את הבדיקה הקודמת ומתגלות
+                # בגלריה כתמונה שחורה מלאה. תמונת דירה אמיתית תמיד עשרות KB+.
+                if (r.status_code == 200 and content_type.startswith("image/")
+                        and "svg" not in content_type and len(r.content) >= MIN_IMAGE_BYTES):
                     path.write_bytes(r.content)
 
             if path.exists():

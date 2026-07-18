@@ -141,6 +141,7 @@ class PerimeterXSolver:
             "--no-default-browser-check",
             "--disable-extensions",
             "--disable-blink-features=AutomationControlled",
+            "--start-minimized",
         ]
         return subprocess.Popen(args)
 

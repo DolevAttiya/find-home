@@ -18,13 +18,18 @@ from playwright.sync_api import sync_playwright
 SESSION_PATH = "fb_session.json"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
 
+# פתיחה ממוזערת - נשארים headless=False (חשוב לעקיפת חסימות בוט) אבל בלי
+# שהחלון יקפוץ ויפריע. --start-minimized לא נתמך רשמית ע"י Playwright
+# אבל Chromium מכבד אותו כ-flag רגיל.
+MINIMIZED_ARGS = ["--start-minimized"]
+
 
 def log(msg):
     print(msg, flush=True)
 
 
 def make_browser(p, use_session=False, session_path=None):
-    browser = p.chromium.launch(headless=False)
+    browser = p.chromium.launch(headless=False, args=MINIMIZED_ARGS)
     kwargs = dict(
         user_agent=UA,
         viewport={"width": 1280, "height": 800},
@@ -119,7 +124,7 @@ def run_madlan():
                 headless=False,
                 user_agent=UA,
                 viewport={"width": 1440, "height": 900},
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"] + MINIMIZED_ARGS,
                 ignore_default_args=["--enable-automation"],
             )
             page = context.new_page()
@@ -165,6 +170,21 @@ def run_dorin():
         print(f"__RESULT__:{new}", flush=True)
     except Exception as e:
         log(f"[דורין] שגיאה: {e}")
+        print("__RESULT__:0", flush=True)
+
+
+def run_komo():
+    """קומו הוא HTML מעובד בשרת בלי הגנת בוטים - requests רגיל מספיק,
+    בלי דפדפן. מוגבל לעמוד 1 של תוצאות למשתמש לא מחובר (ראה komo_scraper.py)."""
+    from core.database import init_db
+    from scrapers.komo_scraper import scrape_komo
+
+    init_db()
+    try:
+        new = scrape_komo(log=log)
+        print(f"__RESULT__:{new}", flush=True)
+    except Exception as e:
+        log(f"[קומו] שגיאה: {e}")
         print("__RESULT__:0", flush=True)
 
 
@@ -221,7 +241,7 @@ def run_yad2():
                 headless=False,
                 user_agent=UA,
                 viewport={"width": 1280, "height": 800},
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"] + MINIMIZED_ARGS,
                 ignore_default_args=["--enable-automation"],
             )
             page = context.new_page()
@@ -249,12 +269,20 @@ def run_yad2():
 
 
 def run_yad2_projects():
-    """אותה חסימת Radware כמו יד2 רגיל - אותה תשתית CDP/פרופיל."""
+    """אותה חסימת Radware כמו יד2 רגיל, ואותו CDP_PORT=9223 בכוונה - שני
+    ה-workers מתחברים כטאבים נפרדים לאותו דפדפן אמיתי שנפתח ע"י
+    start_yad2_browser.py (בטוח לריצה מקבילה, כל אחד מקבל page משלו).
+
+    אבל *פרופיל fallback נפרד* (yad2_projects_profile, לא yad2_profile) -
+    כשאין CDP פעיל, שני workers שמנסים launch_persistent_context על אותה
+    תיקיית פרופיל בו-זמנית מתנגשים (Chromium נועל את user_data_dir; אומת
+    ידנית - הרצה מקבילה על אותה תיקייה גורמת ל-TargetClosedError באחד
+    מהם). כל מקור-סריקה צריך תיקיית fallback משלו."""
     from core.database import init_db
     from scrapers.yad2_projects_scraper import scrape_yad2_projects
     import os, socket
 
-    YAD2_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "yad2_profile")
+    YAD2_PROFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "yad2_projects_profile")
     CDP_PORT = 9223
 
     STEALTH_SCRIPT = """
@@ -298,7 +326,7 @@ def run_yad2_projects():
                 headless=False,
                 user_agent=UA,
                 viewport={"width": 1280, "height": 800},
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"] + MINIMIZED_ARGS,
                 ignore_default_args=["--enable-automation"],
             )
             page = context.new_page()
@@ -339,6 +367,8 @@ if __name__ == "__main__":
         run_yad2_projects()
     elif mode == "dorin":
         run_dorin()
+    elif mode == "komo":
+        run_komo()
     else:
         print(f"Unknown mode: {mode}", flush=True)
         sys.exit(1)

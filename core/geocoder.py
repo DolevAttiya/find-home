@@ -1,5 +1,12 @@
+import os
+import sys
+import io
 import time
 import sqlite3
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if __name__ == "__main__":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 from core.database import DB_PATH
@@ -40,6 +47,21 @@ def geocode_address(address: str, city: str = "") -> tuple[float, float] | None:
                 return location.latitude, location.longitude
         except (GeocoderTimedOut, GeocoderServiceError):
             pass
+
+    time.sleep(1.1)
+
+    # ניסיון 3: כתובות ממדלן בפורמט "רחוב[+מספר], שכונה, עיר" - Nominatim
+    # נכשל כשיש גם שכונה באמצע (אומת ידנית: "התע"ש 9, הל"ה, גבעתיים" נכשל,
+    # "התע"ש 9, גבעתיים" מצליח) - מסירים את המקטע האמצעי ומשווים רק רחוב+עיר
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    if len(parts) >= 3:
+        query3 = f"{parts[0]}, {parts[-1]}, ישראל"
+        try:
+            location = geolocator.geocode(query3, timeout=10)
+            if location:
+                return location.latitude, location.longitude
+        except (GeocoderTimedOut, GeocoderServiceError):
+            pass
         # אין fallback לעיר — עדיף ללא קואורדינטות מאשר נקודת מרכז עיר שגויה
     return None
 
@@ -68,4 +90,7 @@ def geocode_pending(city: str = "גבעתיים"):
 
 
 if __name__ == "__main__":
-    geocode_pending()
+    import yaml
+    with open("config.yaml", encoding="utf-8") as f:
+        _config = yaml.safe_load(f)
+    geocode_pending(city=_config.get("חיפוש", {}).get("מיקום", "גבעתיים"))

@@ -13,6 +13,8 @@ apartment_images/
 fb_session.json
 madlan_profile/
 yad2_profile/
+yad2_projects_profile/
+edge_yad2_profile/
 *.json
 
 # Debug output files
@@ -24,3 +26,6 @@ api_*.json
 # IDE
 .vscode/
 .idea/
+
+# CodeGraph local index
+.codegraph/

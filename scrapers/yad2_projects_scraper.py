@@ -20,9 +20,24 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def build_search_url(config: dict) -> str:
-    # city=6300 = גבעתיים, כמו ביד2 הרגיל
-    return "https://www.yad2.co.il/yad1/newprojects?topArea=2&area=3&city=6300"
+def _locations(config: dict) -> list[str]:
+    """"מיקום" ב-config יכול להיות עיר בודדת (str) או רשימת ערים - כדי
+    לתמוך בחיפוש בכמה ערים במקביל (למשל גבעתיים + רמת גן) בלי לשבור את
+    הפורמט הישן (עיר בודדת)."""
+    loc = config.get("חיפוש", {}).get("מיקום") or "גבעתיים"
+    return loc if isinstance(loc, list) else [loc]
+
+
+# ר' אותה הערה ב-yad2_scraper.py - city היה מקובע בקוד, לא נגזר מ-"מיקום".
+YAD2_CITY_IDS = {
+    "גבעתיים": 6300,
+    "רמת גן": 8600,
+}
+
+
+def build_search_url(config: dict, city: str) -> str:
+    city_id = YAD2_CITY_IDS.get(city, YAD2_CITY_IDS["גבעתיים"])
+    return f"https://www.yad2.co.il/yad1/newprojects?topArea=2&area=3&city={city_id}"
 
 
 def _parse_price(text: str) -> int | None:
@@ -43,8 +58,7 @@ def _parse_range(text: str, unit_pattern: str) -> tuple[float, float] | None:
 
 
 def _passes_city_filter(text: str, config: dict) -> bool:
-    location = config.get("חיפוש", {}).get("מיקום", "")
-    return (location in text) if location else True
+    return any(loc in text for loc in _locations(config))
 
 
 def _ranges_overlap(a: tuple[float, float] | None, b_min, b_max) -> bool:
@@ -59,8 +73,7 @@ def _ranges_overlap(a: tuple[float, float] | None, b_min, b_max) -> bool:
     return True
 
 
-def scrape_yad2_projects(page: Page, log=None) -> int:
-    config = load_config()
+def _scrape_yad2_projects_city(page: Page, config: dict, city: str, log=None) -> int:
     new_count = 0
 
     def _log(msg):
@@ -75,8 +88,8 @@ def scrape_yad2_projects(page: Page, log=None) -> int:
     except Exception:
         pass
 
-    url = build_search_url(config)
-    _log(f"יד2 פרויקטים: נכנס לדף {url}")
+    url = build_search_url(config, city)
+    _log(f"יד2 פרויקטים [{city}]: נכנס לדף {url}")
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -157,5 +170,13 @@ def scrape_yad2_projects(page: Page, log=None) -> int:
             _log(f"יד2 פרויקטים: שגיאה בכרטיסייה - {e}")
             continue
 
-    _log(f"יד2 פרויקטים: סה\"כ {new_count} פרויקטים חדשים נשמרו")
+    _log(f"יד2 פרויקטים [{city}]: סה\"כ {new_count} פרויקטים חדשים נשמרו")
+    return new_count
+
+
+def scrape_yad2_projects(page: Page, log=None) -> int:
+    config = load_config()
+    new_count = 0
+    for city in _locations(config):
+        new_count += _scrape_yad2_projects_city(page, config, city, log=log)
     return new_count

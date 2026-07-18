@@ -97,7 +97,7 @@ def _mentioned(text: str, keywords: list) -> bool | None:
 
 def extract_features(text: str) -> dict:
     return {
-        "has_mamad":    _mentioned(text, ['ממ"ד', "ממד", "מרחב מוגן"]),
+        "has_mamad":    _mentioned(text, ['ממ"ד', "ממ״ד", "ממ׳ד", "ממד", "מרחב מוגן"]),
         "has_parking":  _mentioned(text, ["חניה", "חנייה", "פרקינג"]),
         "has_balcony":  _mentioned(text, ["מרפסת", "מרפסות"]),
         "has_elevator": _mentioned(text, ["מעלית"]),
@@ -360,7 +360,7 @@ def run_scrape(status_callback=None) -> dict:
 
         # --- Phase 1: כניסה לפייסבוק + מציאת קבוצות (sequential) ---
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=False, args=["--start-minimized"])
             context = browser.new_context(
                 storage_state=SESSION_PATH,
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
@@ -390,15 +390,16 @@ def run_scrape(status_callback=None) -> dict:
         log("פייסבוק מדולג (כלול_פייסבוק: false ב-config.yaml)")
 
     # --- Phase 2: סריקה מקבילית ---
-    log(f"מתחיל סריקה מקבילית ({len(all_groups)} קבוצות + מדלן + יד2 + יד2 פרויקטים + דורין)...")
+    log(f"מתחיל סריקה מקבילית ({len(all_groups)} קבוצות + מדלן + יד2 + יד2 פרויקטים + דורין + קומו)...")
 
     tasks = {}  # future → label
-    with ThreadPoolExecutor(max_workers=FB_PARALLEL + 4) as pool:
-        # מדלן, יד2 ודורין קודם — כדי שיתפסו slot מיד ולא יחכו בתור אחרי 60+ קבוצות פייסבוק
+    with ThreadPoolExecutor(max_workers=FB_PARALLEL + 5) as pool:
+        # מדלן, יד2, דורין וקומו קודם — כדי שיתפסו slot מיד ולא יחכו בתור אחרי 60+ קבוצות פייסבוק
         tasks[pool.submit(_launch_worker, ["madlan"])] = "מדלן"
         tasks[pool.submit(_launch_worker, ["yad2"])] = "יד2"
         tasks[pool.submit(_launch_worker, ["yad2_projects"])] = "יד2 פרויקטים"
         tasks[pool.submit(_launch_worker, ["dorin"])] = "דורין"
+        tasks[pool.submit(_launch_worker, ["komo"])] = "קומו"
 
         # פייסבוק - FB_PARALLEL קבוצות במקביל
         for group in all_groups:

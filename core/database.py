@@ -17,6 +17,8 @@ def _migrate(conn):
         "is_active":      "ALTER TABLE apartments ADD COLUMN is_active INTEGER DEFAULT 1",
         "last_seen_at":   "ALTER TABLE apartments ADD COLUMN last_seen_at TEXT",
         "original_price": "ALTER TABLE apartments ADD COLUMN original_price INTEGER",
+        "not_relevant":   "ALTER TABLE apartments ADD COLUMN not_relevant INTEGER DEFAULT 0",
+        "manual_group":   "ALTER TABLE apartments ADD COLUMN manual_group TEXT",
     }
     for col, sql in migrations.items():
         if col not in existing:
@@ -191,6 +193,39 @@ def update_note(post_id: str, note: str):
 def mark_inactive(post_id: str, active: bool = False):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("UPDATE apartments SET is_active = ? WHERE post_id = ?", (1 if active else 0, post_id))
+
+
+def mark_not_relevant(post_id: str, not_relevant: bool = True):
+    """מסמן דירה כלא רלוונטית (שיפוט אישי) - בשונה מ-is_active שמייצג האם
+    המודעה עדיין קיימת במקור. לא נדרס אוטומטית ע"י סריקה חוזרת."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE apartments SET not_relevant = ? WHERE post_id = ?", (1 if not_relevant else 0, post_id))
+
+
+def merge_manually(post_ids: list[str]):
+    """מאחד דירות ידנית לכרטיס אחד - קביעת manual_group משותף. אם לאחת
+    מהמודעות כבר יש manual_group (למשל מרחיבים איחוד קיים), משתמשים בו
+    כדי שהכל יישאר קבוצה אחת."""
+    if len(post_ids) < 2:
+        return
+    with sqlite3.connect(DB_PATH) as conn:
+        placeholders = ",".join("?" * len(post_ids))
+        existing = conn.execute(
+            f"SELECT manual_group FROM apartments WHERE post_id IN ({placeholders}) AND manual_group IS NOT NULL LIMIT 1",
+            post_ids,
+        ).fetchone()
+        group_id = existing[0] if existing else f"manual_{post_ids[0]}"
+        conn.execute(
+            f"UPDATE apartments SET manual_group = ? WHERE post_id IN ({placeholders})",
+            [group_id] + post_ids,
+        )
+
+
+def unmerge_manually(post_ids: list[str]):
+    """מבטל איחוד ידני - מנקה manual_group (לא נוגע באיחוד אוטומטי לפי כתובת/מחיר)."""
+    with sqlite3.connect(DB_PATH) as conn:
+        placeholders = ",".join("?" * len(post_ids))
+        conn.execute(f"UPDATE apartments SET manual_group = NULL WHERE post_id IN ({placeholders})", post_ids)
 
 
 def get_price_history(post_id: str) -> list[dict]:
